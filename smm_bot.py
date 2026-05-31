@@ -124,11 +124,15 @@ async def smm_api(action, **kwargs):
     params = {"key": SMM_API_KEY, "action": action}
     params.update(kwargs)
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(SMM_API_URL, data=params, timeout=30) as r:
-                return await r.json()
+        import json
+        timeout = aiohttp.ClientTimeout(total=60)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(SMM_API_URL, data=params) as r:
+                text = await r.text()
+                logger.info(f"SMM API ({action}): {text[:200]}")
+                return json.loads(text)
     except Exception as e:
-        logger.error(f"SMM API error: {e}")
+        logger.error(f"SMM API error ({action}): {e}")
         return None
 
 async def get_services():
