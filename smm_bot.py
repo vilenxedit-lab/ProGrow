@@ -124,15 +124,11 @@ async def smm_api(action, **kwargs):
     params = {"key": SMM_API_KEY, "action": action}
     params.update(kwargs)
     try:
-        import json
-        timeout = aiohttp.ClientTimeout(total=60)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(SMM_API_URL, data=params) as r:
-                text = await r.text()
-                logger.info(f"SMM API ({action}): {text[:200]}")
-                return json.loads(text)
+        async with aiohttp.ClientSession() as session:
+            async with session.post(SMM_API_URL, data=params, timeout=30) as r:
+                return await r.json()
     except Exception as e:
-        logger.error(f"SMM API error ({action}): {e}")
+        logger.error(f"SMM API error: {e}")
         return None
 
 async def get_services():
@@ -246,12 +242,12 @@ async def browse_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["categories"] = categories
     context.user_data["services"] = {str(s["service"]): s for s in services}
 
-    # Category buttons banao
+    # Category buttons banao — max 20 categories
     buttons = []
-    for cat in sorted(categories.keys()):
+    for cat in sorted(categories.keys())[:20]:
         count = len(categories[cat])
         buttons.append([InlineKeyboardButton(
-            f"📂 {cat} ({count})",
+            f"📂 {cat[:25]} ({count})",
             callback_data=f"cat_{cat[:30]}"
         )])
     buttons.append([InlineKeyboardButton("🔙 Back", callback_data="back_main")])
