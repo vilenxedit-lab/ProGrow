@@ -29,7 +29,7 @@ SMM_API_URL     = "https://smmkings.com/api/v2"             # SMMKings API URL
 ADMIN_IDS       = list(map(int, os.environ.get("ADMIN_IDS", "0").split(",")))
 UPI_ID          = os.environ.get("UPI_ID", "yourname@upi")  # Aapka UPI ID
 MARKUP          = 1.5                                        # 1.5x price
-USD_TO_INR      = 83.0                                       # USD to INR rate
+USD_TO_INR      = 96.0                                       # USD to INR rate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -145,8 +145,9 @@ async def check_order_status(order_id):
 
 def calculate_price(rate_usd, quantity):
     """USD rate se INR price calculate karo with markup"""
-    rate_inr = float(rate_usd) * USD_TO_INR / 1000  # per 1000 units
-    price = (rate_inr * quantity / 1000) * MARKUP
+    # SMMKings rate = USD per 1000 units
+    rate_inr_per_1000 = float(rate_usd) * USD_TO_INR  # INR per 1000 units
+    price = (rate_inr_per_1000 * quantity / 1000) * MARKUP
     return round(price, 2)
 
 # ═══════════════════════════════════════════════════════════════════════════════
