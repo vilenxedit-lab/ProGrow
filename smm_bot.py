@@ -168,7 +168,9 @@ def main_menu_keyboard():
         [InlineKeyboardButton("💰 Wallet Recharge Karo", callback_data="add_funds")],
         [InlineKeyboardButton("📊 Mera Balance", callback_data="my_balance"),
          InlineKeyboardButton("📋 My Orders", callback_data="my_orders")],
-        [InlineKeyboardButton("ℹ️ Help", callback_data="help")]
+        [InlineKeyboardButton("🔔 Track Order", callback_data="track_order"),
+         InlineKeyboardButton("❓ Support", callback_data="help")],
+        [InlineKeyboardButton("ℹ️ How To Use", callback_data="how_to_use")]
     ])
 
 def back_keyboard(back_to="main"):
@@ -186,14 +188,17 @@ async def show_main_menu(update, context, edit=False):
     total_orders = len(user_data.get("orders", []))
 
     text = (
-        f"👋 *Namaste, {user.first_name}!*\n\n"
-        f"🚀 *SMM Panel — Social Media Services*\n\n"
+        f"👋 *Welcome, {user.first_name}!*\n\n"
+        f"🚀 *ProGrow SMM Panel*\n"
+        f"_Professional Social Media Growth Services_\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *Aapka Balance:*  ₹{balance:.2f}\n"
+        f"💰 *Balance:*  ₹{balance:.2f}\n"
+        f"📦 *Total Orders:* {total_orders}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Instagram, YouTube, Telegram, TikTok\n"
-        f"aur 1000+ services available hain! 🎯\n\n"
-        f"Neeche se option chunein 👇"
+        f"📸 Instagram  •  ▶️ YouTube\n"
+        f"👥 Facebook  •  ✈️ Telegram\n\n"
+        f"1000+ premium services available! 🎯\n\n"
+        f"Select an option below 👇"
     )
 
     if edit:
@@ -238,37 +243,107 @@ async def browse_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    # Sirf ye 4 platforms filter karo
-    ALLOWED = ["instagram", "facebook", "youtube", "telegram"]
-    categories = {}
+    # 4 platforms group karo
+    PLATFORMS = {
+        "instagram": {"emoji": "📸", "label": "Instagram"},
+        "facebook":  {"emoji": "👥", "label": "Facebook"},
+        "youtube":   {"emoji": "▶️", "label": "YouTube"},
+        "telegram":  {"emoji": "✈️", "label": "Telegram"},
+    }
+
+    platform_services = {p: [] for p in PLATFORMS}
+    all_categories = {}
+
     for s in services:
         cat = s.get("category", "Other")
-        if any(p in cat.lower() for p in ALLOWED):
-            if cat not in categories:
-                categories[cat] = []
-            categories[cat].append(s)
+        for p in PLATFORMS:
+            if p in cat.lower():
+                platform_services[p].append(s)
+                if cat not in all_categories:
+                    all_categories[cat] = []
+                all_categories[cat].append(s)
 
-    context.user_data["categories"] = categories
+    context.user_data["categories"] = all_categories
+    context.user_data["platform_services"] = platform_services
     context.user_data["services"] = {str(s["service"]): s for s in services}
 
-    # Category buttons banao — max 20 categories
-    buttons = []
-    for cat in sorted(categories.keys())[:20]:
-        count = len(categories[cat])
-        buttons.append([InlineKeyboardButton(
-            f"📂 {cat[:25]} ({count})",
-            callback_data=f"cat_{cat[:30]}"
-        )])
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="back_main")])
+    # 4 platform buttons — 2x2 grid
+    buttons = [
+        [
+            InlineKeyboardButton(f"📸 Instagram", callback_data="platform_instagram"),
+            InlineKeyboardButton(f"▶️ YouTube", callback_data="platform_youtube"),
+        ],
+        [
+            InlineKeyboardButton(f"👥 Facebook", callback_data="platform_facebook"),
+            InlineKeyboardButton(f"✈️ Telegram", callback_data="platform_telegram"),
+        ],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
+    ]
 
+    total = sum(len(v) for v in platform_services.values())
     await query.edit_message_text(
         f"🛍️ *Services Browse Karein*\n\n"
-        f"Total {len(services)} services available hain!\n"
-        f"Koi bhi category select karein 👇",
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Total Services:* {total}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Platform select karein 👇",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
+    return BROWSE_CATEGORY
+
+async def show_platform(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    platform = query.data.replace("platform_", "")
+    PLATFORM_EMOJIS = {
+        "instagram": "📸", "facebook": "👥",
+        "youtube": "▶️", "telegram": "✈️"
+    }
+    emoji = PLATFORM_EMOJIS.get(platform, "📂")
+
+    all_categories = context.user_data.get("categories", {})
+    platform_services = context.user_data.get("platform_services", {})
+
+    # Is platform ki subcategories nikalo
+    sub_cats = {}
+    for cat, svcs in all_categories.items():
+        if platform in cat.lower():
+            sub_cats[cat] = svcs
+
+    if not sub_cats:
+        await query.answer("❌ Koi service nahi mili!", show_alert=True)
+        return BROWSE_CATEGORY
+
+    context.user_data["current_platform"] = platform
+    total = len(platform_services.get(platform, []))
+
+    buttons = []
+    for cat in sorted(sub_cats.keys()):
+        count = len(sub_cats[cat])
+        # Short name — platform name hata do
+        short = cat
+        for p in ["Instagram", "Facebook", "YouTube", "Telegram"]:
+            short = short.replace(p, "").strip(" -|")
+        if not short:
+            short = cat
+        buttons.append([InlineKeyboardButton(
+            f"{emoji} {short[:28]} ({count})",
+            callback_data=f"cat_{cat[:30]}"
+        )])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="browse_services")])
+
+    await query.edit_message_text(
+        f"{emoji} *{platform.capitalize()} Services*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 *Total:* {total} services\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Category select karein 👇",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
     return BROWSE_CATEGORY
 
 async def show_category(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -588,6 +663,97 @@ async def enter_utr(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  TRACK ORDER
+# ═══════════════════════════════════════════════════════════════════════════════
+async def track_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    col = get_col("orders")
+    orders = []
+    if col:
+        orders = list(col.find(
+            {"user_id": str(update.effective_user.id)},
+            sort=[("created_at", -1)],
+            limit=5
+        ))
+
+    if not orders:
+        await query.edit_message_text(
+            "🔔 *Track Order*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "❌ Koi active order nahi mila!\n\n"
+            "Order karne ke liye 'Services Order Karo' dabayein.",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🛍️ Services Order Karo", callback_data="browse")],
+                [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
+            ])
+        )
+        return
+
+    text = "🔔 *Order Tracking*\n\n━━━━━━━━━━━━━━━━━━━━\n\n"
+    for o in orders:
+        status = o.get("status", "pending")
+        if status == "Completed":
+            emoji = "✅"
+        elif status == "pending":
+            emoji = "⏳"
+        elif status == "Processing":
+            emoji = "🔄"
+        else:
+            emoji = "❌"
+        text += (
+            f"{emoji} *Order #{o.get('smm_order_id', 'N/A')}*\n"
+            f"📦 {o.get('service_name', 'N/A')[:35]}\n"
+            f"🔢 Qty: {o.get('quantity')} | 💰 ₹{o.get('price')}\n"
+            f"📊 Status: *{status}*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        )
+
+    await query.edit_message_text(
+        text,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔄 Refresh", callback_data="track_order")],
+            [InlineKeyboardButton("🛍️ New Order", callback_data="browse")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+        ])
+    )
+
+async def how_to_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text(
+        "ℹ️ *How To Use — ProGrow SMM Panel*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📌 *Step 1 — Wallet Recharge*\n"
+        "• 'Wallet Recharge Karo' button dabayein\n"
+        "• UPI ID pe payment karein\n"
+        "• UTR number submit karein\n"
+        "• 5-15 min mein balance add hoga\n\n"
+        "📌 *Step 2 — Service Select Karo*\n"
+        "• 'Services Order Karo' dabayein\n"
+        "• Platform select karo (Instagram/YouTube etc)\n"
+        "• Category aur service chunein\n\n"
+        "📌 *Step 3 — Order Karo*\n"
+        "• Profile/Post ka link paste karo\n"
+        "• Quantity enter karo\n"
+        "• Order confirm karo\n\n"
+        "📌 *Step 4 — Track Karo*\n"
+        "• 'Track Order' se real-time status dekho\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 _Koi problem? Support se contact karein!_",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💰 Add Funds", callback_data="add_funds")],
+            [InlineKeyboardButton("🛍️ Order Karo", callback_data="browse")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+        ])
+    )
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  BALANCE & ORDERS
 # ═══════════════════════════════════════════════════════════════════════════════
 async def my_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -607,17 +773,18 @@ async def my_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             total_spent += p.get("amount", 0)
 
     await query.edit_message_text(
-        f"💰 *Aapka Wallet*\n\n"
+        f"💰 *My Wallet*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
         f"💵 *Current Balance:* ₹{balance:.2f}\n"
-        f"📊 *Total Orders:* {total_orders}\n"
+        f"📦 *Total Orders:* {total_orders}\n"
         f"💳 *Total Recharged:* ₹{total_spent:.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Balance badhane ke liye 'Wallet Recharge' karein!",
+        f"💡 _Minimum recharge: ₹50_",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💰 Recharge Karo", callback_data="add_funds")],
-            [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
+            [InlineKeyboardButton("💰 Add Funds", callback_data="add_funds")],
+            [InlineKeyboardButton("📋 My Orders", callback_data="my_orders")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
         ])
     )
 
@@ -668,16 +835,20 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     await query.edit_message_text(
-        f"ℹ️ *Help Guide*\n\n"
-        f"*Kaise use karein:*\n\n"
-        f"1️⃣ *Services* — Instagram, YouTube, Telegram services dekho\n"
-        f"2️⃣ *Wallet Recharge* — UPI se balance add karo\n"
-        f"3️⃣ *Order karo* — Service chunein, link dein, quantity enter karein\n"
-        f"4️⃣ *Track* — My Orders se status check karo\n\n"
-        f"*Payment process:*\n"
-        f"• UPI ID pe pay karo: `{UPI_ID}`\n"
-        f"• UTR number bot mein dalo\n"
-        f"• 5-15 min mein balance add hoga\n\n"
+        f"❓ *Support & Help*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📌 *Quick Guide:*\n\n"
+        f"1️⃣ *Services Order Karo* — Platform select karo, service chunein\n"
+        f"2️⃣ *Add Funds* — UPI se wallet recharge karo\n"
+        f"3️⃣ *Order* — Link & quantity enter karo\n"
+        f"4️⃣ *Track Order* — Real-time status check karo\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"💳 *Payment Details:*\n"
+        f"• UPI ID: `{UPI_ID}`\n"
+        f"• Min Recharge: ₹50\n"
+        f"• Approval Time: 5-15 min\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📞 *Contact Admin:* @NexusXedit\n\n"
         f"*Support ke liye admin se contact karein!*",
         parse_mode="Markdown",
         reply_markup=back_keyboard()
@@ -796,13 +967,19 @@ def main():
         entry_points=[CallbackQueryHandler(browse_services, pattern="^browse$")],
         states={
             BROWSE_CATEGORY: [
+                CallbackQueryHandler(show_platform, pattern="^platform_"),
                 CallbackQueryHandler(show_category, pattern="^cat_"),
+                CallbackQueryHandler(browse_services, pattern="^browse_services$"),
                 CallbackQueryHandler(back_handler, pattern="^back_")
             ],
             SELECT_SERVICE: [
                 CallbackQueryHandler(show_service, pattern="^svc_"),
                 CallbackQueryHandler(browse_services, pattern="^browse$"),
                 CallbackQueryHandler(show_category, pattern="^cat_"),
+                CallbackQueryHandler(my_balance, pattern="^my_balance$"),
+                CallbackQueryHandler(my_orders, pattern="^my_orders$"),
+                CallbackQueryHandler(track_order, pattern="^track_order$"),
+                CallbackQueryHandler(how_to_use, pattern="^how_to_use$"),
             ],
             ENTER_LINK: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, enter_link),
@@ -852,6 +1029,8 @@ def main():
     app.add_handler(CallbackQueryHandler(my_balance, pattern="^my_balance$"))
     app.add_handler(CallbackQueryHandler(my_orders, pattern="^my_orders$"))
     app.add_handler(CallbackQueryHandler(help_handler, pattern="^help$"))
+    app.add_handler(CallbackQueryHandler(track_order, pattern="^track_order$"))
+    app.add_handler(CallbackQueryHandler(how_to_use, pattern="^how_to_use$"))
     app.add_handler(CallbackQueryHandler(back_handler, pattern="^back_"))
 
     logger.info("SMM Bot starting...")
