@@ -287,8 +287,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Step 1: Captcha dikhao
     question, answer = generate_captcha()
-    context.user_data["captcha_answer"] = answer
-    context.user_data["captcha_solved"] = False
+    # Answer DB mein save karo — context pe depend mat karo (bot restart safe)
+    update_user(user.id, {"captcha_answer": answer, "captcha_solved": False})
+    context.user_data["captcha_answer"] = answer  # session backup
 
     await update.effective_message.reply_text(
         f"👋 *Welcome to ProGrow SMM Panel!*\n\n"
@@ -315,11 +316,25 @@ async def captcha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CAPTCHA_STATE
 
-    correct = context.user_data.get("captcha_answer")
+    # DB se correct answer lo (session-safe)
+    user_doc = get_user(update.effective_user.id)
+    correct = user_doc.get("captcha_answer") or context.user_data.get("captcha_answer")
+
+    if correct is None:
+        # Captcha expire ho gaya — naya do
+        question, answer = generate_captcha()
+        update_user(update.effective_user.id, {"captcha_answer": answer})
+        context.user_data["captcha_answer"] = answer
+        await update.message.reply_text(
+            f"⚠️ *Session expire ho gaya!*\n\nNaya captcha:\n\n📝 *{question} = ?*",
+            parse_mode="Markdown"
+        )
+        return CAPTCHA_STATE
 
     if user_answer != correct:
         # Naya captcha do
         question, answer = generate_captcha()
+        update_user(update.effective_user.id, {"captcha_answer": answer})
         context.user_data["captcha_answer"] = answer
         await update.message.reply_text(
             f"❌ *Galat answer!*\n\n"
