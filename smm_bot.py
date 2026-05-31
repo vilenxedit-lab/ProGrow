@@ -231,13 +231,15 @@ async def browse_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    # Categories nikalo
+    # Sirf ye 4 platforms filter karo
+    ALLOWED = ["instagram", "facebook", "youtube", "telegram"]
     categories = {}
     for s in services:
         cat = s.get("category", "Other")
-        if cat not in categories:
-            categories[cat] = []
-        categories[cat].append(s)
+        if any(p in cat.lower() for p in ALLOWED):
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(s)
 
     context.user_data["categories"] = categories
     context.user_data["services"] = {str(s["service"]): s for s in services}
