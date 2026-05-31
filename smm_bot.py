@@ -80,7 +80,7 @@ def get_user(uid):
 
 def update_user(uid, data):
     col = get_col("users")
-    if col:
+    if col is not None:
         col.update_one({"_id": str(uid)}, {"$set": data}, upsert=True)
 
 def add_balance(uid, amount):
@@ -97,7 +97,7 @@ def deduct_balance(uid, amount):
 
 def save_order(uid, order_data):
     col = get_col("orders")
-    if col:
+    if col is not None:
         order_data["user_id"] = str(uid)
         order_data["created_at"] = datetime.now()
         col.insert_one(order_data)
@@ -105,18 +105,18 @@ def save_order(uid, order_data):
 def get_pending_referral(referred_uid):
     """Check karo kisi ka referral pending hai"""
     col = get_col("referrals")
-    if col:
+    if col is not None:
         return col.find_one({"referred_id": str(referred_uid), "bonus_paid": False})
     return None
 
 def mark_referral_paid(referred_uid):
     col = get_col("referrals")
-    if col:
+    if col is not None:
         col.update_one({"referred_id": str(referred_uid)}, {"$set": {"bonus_paid": True}})
 
 def save_referral(referrer_uid, referred_uid):
     col = get_col("referrals")
-    if col:
+    if col is not None:
         existing = col.find_one({"referred_id": str(referred_uid)})
         if not existing:
             col.insert_one({
@@ -128,7 +128,7 @@ def save_referral(referrer_uid, referred_uid):
 
 def get_referral_count(uid):
     col = get_col("referrals")
-    if col:
+    if col is not None:
         return col.count_documents({"referrer_id": str(uid), "bonus_paid": True})
     return 0
 
@@ -880,7 +880,7 @@ async def track_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     col = get_col("orders")
     orders = []
-    if col:
+    if col is not None:
         orders = list(col.find(
             {"user_id": str(update.effective_user.id)},
             sort=[("created_at", -1)],
@@ -958,7 +958,7 @@ async def my_orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     col = get_col("orders")
     orders = []
-    if col:
+    if col is not None:
         orders = list(col.find(
             {"user_id": str(update.effective_user.id)},
             sort=[("created_at", -1)],
