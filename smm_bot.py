@@ -221,7 +221,14 @@ async def browse_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-    services = await get_services()
+    # Cache check karo
+    cached = context.bot_data.get("services_cache")
+    if cached:
+        services = cached
+    else:
+        services = await get_services()
+        if services and isinstance(services, list):
+            context.bot_data["services_cache"] = services
 
     if not services:
         await query.edit_message_text(
