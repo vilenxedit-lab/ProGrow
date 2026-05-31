@@ -232,6 +232,56 @@ def channel_join_keyboard():
     ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  GLOBAL MESSAGE HANDLER — Captcha ke liye (session-safe)
+# ═══════════════════════════════════════════════════════════════════════════════
+async def global_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Har text message yahan aata hai — captcha pending ho to check karo"""
+    user = update.effective_user
+    user_doc = get_user(user.id)
+
+    # Agar already verified hai to ignore karo
+    if user_doc.get("joined") and user_doc.get("signup_bonus_given"):
+        return
+
+    # Captcha pending hai?
+    if not user_doc.get("captcha_solved") and user_doc.get("captcha_answer") is not None:
+        text = update.message.text.strip()
+        try:
+            user_answer = int(text)
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Sirf *number* type karein!\n\nDobara try karein:",
+                parse_mode="Markdown"
+            )
+            return
+
+        correct = user_doc.get("captcha_answer")
+
+        if user_answer != correct:
+            question, answer = generate_captcha()
+            update_user(user.id, {"captcha_answer": answer})
+            await update.message.reply_text(
+                f"❌ *Galat answer!*\n\n"
+                f"Naya question try karein:\n\n"
+                f"📝 *{question} = ?*",
+                parse_mode="Markdown"
+            )
+            return
+
+        # Sahi answer!
+        update_user(user.id, {"captcha_solved": True, "captcha_answer": None})
+        await update.message.reply_text(
+            f"✅ *Captcha Solved!*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📢 *Hamara Channel Join Karein*\n\n"
+            f"Bot use karne ke liye aur *₹10 signup bonus* paane ke liye\n"
+            f"pehle hamara Telegram channel join karna zaroori hai!\n\n"
+            f"👇 Neeche button dabao:",
+            parse_mode="Markdown",
+            reply_markup=channel_join_keyboard()
+        )
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  MAIN MENU
 # ═══════════════════════════════════════════════════════════════════════════════
 async def show_main_menu(update, context, edit=False):
@@ -287,9 +337,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Step 1: Captcha dikhao
     question, answer = generate_captcha()
-    # Answer DB mein save karo — context pe depend mat karo (bot restart safe)
+    # Answer DB mein save karo — session-safe
     update_user(user.id, {"captcha_answer": answer, "captcha_solved": False})
-    context.user_data["captcha_answer"] = answer  # session backup
 
     await update.effective_message.reply_text(
         f"👋 *Welcome to ProGrow SMM Panel!*\n\n"
@@ -301,64 +350,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"_Sirf answer number mein type karein_",
         parse_mode="Markdown"
     )
-    return CAPTCHA_STATE
 
-async def captcha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Captcha answer verify karo"""
-    text = update.message.text.strip()
 
-    try:
-        user_answer = int(text)
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Sirf *number* type karein!\n\nDobara try karein:",
-            parse_mode="Markdown"
-        )
-        return CAPTCHA_STATE
-
-    # DB se correct answer lo (session-safe)
-    user_doc = get_user(update.effective_user.id)
-    correct = user_doc.get("captcha_answer") or context.user_data.get("captcha_answer")
-
-    if correct is None:
-        # Captcha expire ho gaya — naya do
-        question, answer = generate_captcha()
-        update_user(update.effective_user.id, {"captcha_answer": answer})
-        context.user_data["captcha_answer"] = answer
-        await update.message.reply_text(
-            f"⚠️ *Session expire ho gaya!*\n\nNaya captcha:\n\n📝 *{question} = ?*",
-            parse_mode="Markdown"
-        )
-        return CAPTCHA_STATE
-
-    if user_answer != correct:
-        # Naya captcha do
-        question, answer = generate_captcha()
-        update_user(update.effective_user.id, {"captcha_answer": answer})
-        context.user_data["captcha_answer"] = answer
-        await update.message.reply_text(
-            f"❌ *Galat answer!*\n\n"
-            f"Naya question try karein:\n\n"
-            f"📝 *{question} = ?*",
-            parse_mode="Markdown"
-        )
-        return CAPTCHA_STATE
-
-    # Captcha solved! DB mein mark karo
-    update_user(update.effective_user.id, {"captcha_solved": True})
-
-    # Step 2: Channel join karne bolo
-    await update.message.reply_text(
-        f"✅ *Captcha Solved!*\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📢 *Hamara Channel Join Karein*\n\n"
-        f"Bot use karne ke liye aur *₹10 signup bonus* paane ke liye\n"
-        f"pehle hamara Telegram channel join karna zaroori hai!\n\n"
-        f"👇 Neeche button dabao:",
-        parse_mode="Markdown",
-        reply_markup=channel_join_keyboard()
-    )
-    return ConversationHandler.END
 
 async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """User ne 'Maine Join Kar Liya' dabaya — verify karo"""
@@ -1124,22 +1117,13 @@ async def back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MAIN
+#  GLOBAL MESSAGE HANDLER — Captcha ke liye (session-safe)
 # ═══════════════════════════════════════════════════════════════════════════════
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Start + Captcha conversation
-    start_conv = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            CAPTCHA_STATE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, captcha_handler)
-            ],
-        },
-        fallbacks=[CommandHandler("start", start)],
-        allow_reentry=True
-    )
+    # Start + Captcha — ConversationHandler nahi, simple handlers use karo
+    # Kyunki ConversationHandler state lose karta hai bot restart pe
 
     # Order conversation
     order_conv = ConversationHandler(
@@ -1180,8 +1164,10 @@ def main():
         allow_reentry=True
     )
 
-    app.add_handler(start_conv)
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", admin_stats))
+    # Global message handler — captcha ke liye (ConversationHandler ke bahar)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, global_message_handler))
     app.add_handler(CommandHandler("addbal", admin_add_balance))
     app.add_handler(order_conv)
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern="^check_join$"))
