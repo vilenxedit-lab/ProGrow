@@ -74,7 +74,7 @@ def get_user(uid):
         return {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False}
     doc = col.find_one({"_id": uid})
     if not doc:
-        doc = {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False}
+        doc = {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False, "captcha_solved": False}
         col.insert_one(doc)
     return doc
 
@@ -329,8 +329,8 @@ async def captcha_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return CAPTCHA_STATE
 
-    # Captcha solved!
-    context.user_data["captcha_solved"] = True
+    # Captcha solved! DB mein mark karo
+    update_user(update.effective_user.id, {"captcha_solved": True})
 
     # Step 2: Channel join karne bolo
     await update.message.reply_text(
@@ -351,11 +351,12 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
 
     user = update.effective_user
+    user_doc = get_user(user.id)
 
-    # Captcha pehle solve hona chahiye
-    if not context.user_data.get("captcha_solved"):
+    # Captcha solve nahi kiya to wapas bhejo
+    if not user_doc.get("captcha_solved") and not user_doc.get("signup_bonus_given"):
         await query.edit_message_text(
-            "⚠️ Pehle captcha solve karein!\n\n/start dabayein.",
+            "⚠️ *Pehle Captcha Solve Karein!*\n\n/start dabayein aur captcha complete karein.",
             parse_mode="Markdown"
         )
         return
