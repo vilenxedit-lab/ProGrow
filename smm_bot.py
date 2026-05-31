@@ -43,9 +43,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  MONGODB
+#  MONGODB — Single persistent connection
 # ═══════════════════════════════════════════════════════════════════════════════
-def get_col(name):
+_db = None
+
+def get_db():
+    global _db
+    if _db is not None:
+        return _db
     if not MONGO_URI:
         return None
     try:
@@ -53,29 +58,40 @@ def get_col(name):
         client = MongoClient(
             MONGO_URI,
             tlsCAFile=certifi.where(),
-            serverSelectionTimeoutMS=30000,
-            connectTimeoutMS=30000,
-            socketTimeoutMS=30000
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
+            maxPoolSize=10
         )
     except Exception:
         client = MongoClient(
             MONGO_URI,
             tlsAllowInvalidCertificates=True,
-            serverSelectionTimeoutMS=30000,
-            connectTimeoutMS=30000,
-            socketTimeoutMS=30000
+            serverSelectionTimeoutMS=5000,
+            connectTimeoutMS=5000,
+            socketTimeoutMS=10000,
+            maxPoolSize=10
         )
-    return client["smmbot"][name]
+    _db = client["smmbot"]
+    return _db
+
+def get_col(name):
+    db = get_db()
+    if db is None:
+        return None
+    return db[name]
 
 def get_user(uid):
     col = get_col("users")
     uid = str(uid)
     if col is None:
-        return {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False}
-    doc = col.find_one({"_id": uid})
-    if not doc:
-        doc = {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False, "captcha_solved": False}
-        col.insert_one(doc)
+        return {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False, "captcha_solved": False}
+    doc = col.find_one_and_update(
+        {"_id": uid},
+        {"$setOnInsert": {"_id": uid, "balance": 0.0, "orders": [], "joined": False, "signup_bonus_given": False, "captcha_solved": False}},
+        upsert=True,
+        return_document=True
+    )
     return doc
 
 def update_user(uid, data):
@@ -84,16 +100,28 @@ def update_user(uid, data):
         col.update_one({"_id": str(uid)}, {"$set": data}, upsert=True)
 
 def add_balance(uid, amount):
-    user = get_user(uid)
-    new_bal = round(user.get("balance", 0) + amount, 2)
-    update_user(uid, {"balance": new_bal})
-    return new_bal
+    col = get_col("users")
+    if col is not None:
+        result = col.find_one_and_update(
+            {"_id": str(uid)},
+            {"$inc": {"balance": round(amount, 2)}},
+            upsert=True,
+            return_document=True
+        )
+        return round(result.get("balance", 0), 2) if result else 0
+    return 0
 
 def deduct_balance(uid, amount):
-    user = get_user(uid)
-    new_bal = round(user.get("balance", 0) - amount, 2)
-    update_user(uid, {"balance": new_bal})
-    return new_bal
+    col = get_col("users")
+    if col is not None:
+        result = col.find_one_and_update(
+            {"_id": str(uid)},
+            {"$inc": {"balance": -round(amount, 2)}},
+            upsert=True,
+            return_document=True
+        )
+        return round(result.get("balance", 0), 2) if result else 0
+    return 0
 
 def save_order(uid, order_data):
     col = get_col("orders")
@@ -216,7 +244,7 @@ def main_menu_keyboard():
          InlineKeyboardButton("📋 My Orders", callback_data="my_orders")],
         [InlineKeyboardButton("🔔 Track Order", callback_data="track_order"),
          InlineKeyboardButton("❓ Support", callback_data="help")],
-        [InlineKeyboardButton("🤝 Refer & Earn", callback_data="refer_earn")],
+        [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
         [InlineKeyboardButton("ℹ️ How To Use", callback_data="how_to_use")]
     ])
 
@@ -290,7 +318,7 @@ async def show_main_menu(update, context, edit=False):
     balance = user_data.get("balance", 0)
 
     col = get_col("orders")
-    total_orders = col.count_documents({"user_id": str(user.id)}) if col else 0
+    total_orders = col.count_documents({"user_id": str(user.id)}) if col is not None else 0
 
     text = (
         f"👋 *Welcome, {user.first_name}!*\n\n"
@@ -430,7 +458,8 @@ async def check_join_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         f"💰 *Current Balance:* ₹{new_balance:.2f}"
         f"{referral_msg}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Ab bot ka mazaa lo! 🚀",
+        f"📸 Instagram | ▶️ YouTube | 👥 Facebook | ✈️ Telegram\n"
+        f"✅ *All Services Available 24/7*",
         parse_mode="Markdown",
         reply_markup=main_menu_keyboard()
     )
@@ -495,13 +524,16 @@ async def browse_services(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-    cached = context.bot_data.get("services_cache")
-    if cached:
-        services = cached
+    import time
+    cache_data = context.bot_data.get("services_cache")
+    cache_time = context.bot_data.get("services_cache_time", 0)
+    if cache_data and (time.time() - cache_time) < 1800:  # 30 min cache
+        services = cache_data
     else:
         services = await get_services()
         if services and isinstance(services, list):
             context.bot_data["services_cache"] = services
+            context.bot_data["services_cache_time"] = time.time()
 
     if not services:
         await query.edit_message_text(
@@ -772,7 +804,7 @@ async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"💡 Refer karein aur balance earn karein!"
         )
         keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤝 Refer & Earn", callback_data="refer_earn")],
+            [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
             [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
         ])
 
@@ -794,7 +826,7 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(
             "❌ Balance kam hai! Refer karein aur balance earn karein.",
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🤝 Refer & Earn", callback_data="refer_earn")
+                InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")
             ]])
         )
         return ConversationHandler.END
@@ -946,7 +978,7 @@ async def my_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💡 _Refer karein aur aur balance earn karein!_",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤝 Refer & Earn", callback_data="refer_earn")],
+            [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
             [InlineKeyboardButton("📋 My Orders", callback_data="my_orders")],
             [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
         ])
@@ -1024,7 +1056,7 @@ async def how_to_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💡 _Koi problem? Support se contact karein!_",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🤝 Refer & Earn", callback_data="refer_earn")],
+            [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
             [InlineKeyboardButton("🛍️ Order Karo", callback_data="browse")],
             [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
         ])
