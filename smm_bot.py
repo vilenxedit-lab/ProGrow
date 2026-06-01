@@ -860,6 +860,10 @@ async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"\n❌ *Balance kam hai!* ₹{needed} aur chahiye.\n\n"
             f"💡 Refer karein aur balance earn karein!"
         )
+        # Popup alert bhi dikhao
+        await update.message.reply_text(
+            f"⚠️ Insufficient Balance!\nNeed ₹{total_price:.2f}. Current balance ₹{balance:.2f}.",
+        )
         keyboard = InlineKeyboardMarkup([
             [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
             [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
@@ -880,8 +884,18 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_data = get_user(user.id)
     if user_data.get("balance", 0) < price:
+        needed = round(price - user_data.get("balance", 0), 2)
+        await query.answer(
+            f"❌ Balance kam hai! ₹{needed} aur chahiye.",
+            show_alert=True
+        )
         await query.edit_message_text(
-            "❌ Balance kam hai! Refer karein aur balance earn karein.",
+            f"❌ *Balance Insufficient!*\n\n"
+            f"💰 Aapka Balance: ₹{user_data.get('balance', 0):.2f}\n"
+            f"💳 Order Price: ₹{price:.2f}\n"
+            f"⚠️ ₹{needed} aur chahiye!\n\n"
+            f"👥 Refer karo aur balance earn karo!",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")
             ]])
