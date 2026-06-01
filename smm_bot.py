@@ -952,75 +952,84 @@ async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         qty = int(update.message.text.strip())
     except ValueError:
-        await update.message.reply_text("❌ Sirf number enter karein!")
+        await update.message.reply_text(
+            "❌ *Sirf number enter karein!*\n\nExample: `1000`",
+            parse_mode="Markdown"
+        )
         return ENTER_QUANTITY
 
     s = context.user_data.get("selected_service", {})
     min_qty = int(s.get("min", 10))
     max_qty = int(s.get("max", 10000))
+    user = get_user(update.effective_user.id)
+    balance = user.get("balance", 0)
+    total_price = calculate_price(s["rate"], qty)
 
     if qty < min_qty or qty > max_qty:
         await update.message.reply_text(
-            f"❌ Quantity {min_qty} aur {max_qty} ke beech honi chahiye!"
+            f"❌ *Invalid Quantity!*\n\n"
+            f"📉 Min: *{min_qty}* | 📈 Max: *{max_qty}*\n\n"
+            f"Dobara try karein:",
+            parse_mode="Markdown"
         )
         return ENTER_QUANTITY
 
     context.user_data["order_qty"] = qty
-    total_price = calculate_price(s["rate"], qty)
     context.user_data["order_price"] = total_price
 
-    # Minimum ₹50 order check
+    # Status calculate karo
     if total_price < MIN_ORDER_AMOUNT:
-        await update.message.reply_text(
-            f"❌ *Minimum Order ₹{MIN_ORDER_AMOUNT:.0f} ka hona chahiye!*\n\n"
-            f"Is service ka total price ₹{total_price:.2f} hai jo minimum se kam hai.\n"
-            f"Zyada quantity try karein!",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Order Again", callback_data=f"svc_{s.get('service', '')}")],
-                [InlineKeyboardButton("🔙 Services Dekho", callback_data="browse")],
-                [InlineKeyboardButton("🏠 Main Menu", callback_data="back_main")]
-            ])
-        )
-        return ConversationHandler.END
-
-    user = get_user(update.effective_user.id)
-    balance = user.get("balance", 0)
-
-    text = (
-        f"📋 *Order Summary*\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔷 *Service:* {s['name']}\n"
-        f"🔗 *Link:* `{context.user_data['order_link']}`\n"
-        f"🔢 *Quantity:* {qty}\n"
-        f"💰 *Total Price:* ₹{total_price}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💳 *Aapka Balance:* ₹{balance:.2f}\n"
-    )
-
-    if balance >= total_price:
-        text += f"\n✅ *Balance sufficient hai!*\nOrder confirm karein?"
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Confirm Order", callback_data="confirm_order")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="back_main")]
-        ])
-    else:
+        status_line = f"⚠️ Min order ₹{MIN_ORDER_AMOUNT:.0f} — quantity badhao!"
+        can_order = False
+    elif balance < total_price:
         needed = round(total_price - balance, 2)
-        text += (
-            f"\n❌ *Balance kam hai!* ₹{needed} aur chahiye.\n\n"
-            f"💡 Refer karein aur balance earn karein!"
-        )
-        # Popup alert bhi dikhao
-        await update.message.reply_text(
-            f"⚠️ Insufficient Balance!\nNeed ₹{total_price:.2f}. Current balance ₹{balance:.2f}.",
-        )
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
-            [InlineKeyboardButton("🔙 Back", callback_data="back_main")]
-        ])
+        status_line = f"❌ ₹{needed} aur chahiye"
+        can_order = False
+    else:
+        status_line = "✅ Balance sufficient!"
+        can_order = True
 
-    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=keyboard)
-    return CONFIRM_ORDER
+    # Quick quantity buttons bhi dikhao wapas
+    quick_qtys = [min_qty, 500, 1000, 2000, 5000, 10000]
+    quick_qtys = sorted(list(set([q for q in quick_qtys if min_qty <= q <= max_qty])))[:6]
+
+    buttons = []
+    row = []
+    for q in quick_qtys:
+        price = calculate_price(s.get("rate", 0), q)
+        label = f"✅ {q} — ₹{price:.1f}" if q == qty else f"{q} — ₹{price:.1f}"
+        row.append(InlineKeyboardButton(label, callback_data=f"qty_{q}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    if can_order:
+        buttons.append([InlineKeyboardButton(f"✅ Confirm — ₹{total_price:.2f}", callback_data=f"confirm_qty_{qty}")])
+    else:
+        if total_price < MIN_ORDER_AMOUNT:
+            buttons.append([InlineKeyboardButton("🔄 Order Again", callback_data=f"svc_{s.get('service', '')}")])
+        else:
+            buttons.append([InlineKeyboardButton("👥 Refer & Earn — Balance Badhao", callback_data="refer_earn")])
+
+    buttons.append([InlineKeyboardButton("✏️ Custom Quantity", callback_data="qty_custom")])
+    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="browse")])
+
+    await update.message.reply_text(
+        f"📊 *Live Price Calculator*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔷 *Service:* {s['name'][:35]}\n"
+        f"🔢 *Entered Qty:* {qty}\n"
+        f"💰 *Price:* ₹{total_price:.2f}\n"
+        f"💳 *Your Balance:* ₹{balance:.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"{status_line}\n\n"
+        f"_Quantity change karo ya confirm karo 👇_",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+    return CALC_QUANTITY
 
 async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
