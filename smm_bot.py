@@ -727,6 +727,17 @@ async def show_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def enter_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = update.message.text.strip()
+
+    # Basic link validation
+    if not (link.startswith("http://") or link.startswith("https://")):
+        await update.message.reply_text(
+            "❌ *Invalid Link!*\n\n"
+            "Please send a valid URL starting with `http://` or `https://`\n\n"
+            "Example: `https://www.instagram.com/yourprofile`",
+            parse_mode="Markdown"
+        )
+        return ENTER_LINK
+
     context.user_data["order_link"] = link
 
     s = context.user_data.get("selected_service", {})
@@ -734,8 +745,14 @@ async def enter_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     max_qty = s.get("max", 10000)
 
     await update.message.reply_text(
-        f"✅ *Link save ho gaya!*\n\n"
-        f"Ab *quantity* enter karein:\n"
+        f"✅ *Link Accepted!*\n\n"
+        f"⚠️ *DISCLAIMER:*\n"
+        f"_Please make sure you have entered the correct link. "
+        f"Once the order is placed and balance is deducted, "
+        f"it cannot be refunded under any circumstances. "
+        f"Double-check your link before confirming._\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Now enter *quantity*:\n"
         f"_(Min: {min_qty} | Max: {max_qty})_",
         parse_mode="Markdown"
     )
@@ -1198,8 +1215,6 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", admin_stats))
-    # Global message handler — captcha ke liye (ConversationHandler ke bahar)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, global_message_handler))
     app.add_handler(CommandHandler("addbal", admin_add_balance))
     app.add_handler(order_conv)
     app.add_handler(CallbackQueryHandler(check_join_callback, pattern="^check_join$"))
@@ -1210,6 +1225,9 @@ def main():
     app.add_handler(CallbackQueryHandler(how_to_use, pattern="^how_to_use$"))
     app.add_handler(CallbackQueryHandler(refer_earn, pattern="^refer_earn$"))
     app.add_handler(CallbackQueryHandler(back_handler, pattern="^back_"))
+
+    # Global message handler LAST mein — taaki ConversationHandler pehle handle kare
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, global_message_handler))
 
     logger.info("SMM Bot starting...")
     app.run_polling()
