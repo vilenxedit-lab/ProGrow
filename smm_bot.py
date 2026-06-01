@@ -203,6 +203,11 @@ async def check_channel_membership(bot, user_id: int) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 #  CAPTCHA
 # ═══════════════════════════════════════════════════════════════════════════════
+
+def is_valid_social_url(url):
+    pattern = r"^https?://[^\s]+\.[^\s]+$"
+    return re.match(pattern, url) is not None
+
 def generate_captcha():
     """Simple math captcha generate karo"""
     a = random.randint(1, 20)
@@ -1140,8 +1145,9 @@ async def show_service(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def enter_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     link = update.message.text.strip()
 
-    # Basic link validation
-    if not (link.startswith("http://") or link.startswith("https://")):
+    # Better link validation
+    logger.info(f"LINK RECEIVED: {link}")
+    if not is_valid_social_url(link):
         await update.message.reply_text(
             "❌ *Invalid Link!*\n\n"
             "Please send a valid URL starting with `http://` or `https://`\n\n"
