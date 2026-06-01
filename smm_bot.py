@@ -245,6 +245,7 @@ def main_menu_keyboard():
         [InlineKeyboardButton("🔔 Track Order", callback_data="track_order"),
          InlineKeyboardButton("❓ Support", callback_data="help")],
         [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
+        [InlineKeyboardButton("🆓 How Is This Free?", callback_data="why_free")],
         [InlineKeyboardButton("ℹ️ How To Use", callback_data="how_to_use")]
     ])
 
@@ -308,6 +309,45 @@ async def global_message_handler(update: Update, context: ContextTypes.DEFAULT_T
             parse_mode="Markdown",
             reply_markup=channel_join_keyboard()
         )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  WHY FREE
+# ═══════════════════════════════════════════════════════════════════════════════
+async def why_free(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    await query.edit_message_text(
+        "🆓 *How Is ProGrow SMM Panel Free?*\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "💰 *How Do We Earn?*\n"
+        "We buy SMM services in bulk at wholesale rates from trusted providers like SMMKings. "
+        "When you place an order, a small markup is added on top of the wholesale price. "
+        "This markup covers our costs and keeps the panel running.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🎁 *Why Do We Give Free Balance?*\n"
+        "The ₹10 signup bonus and ₹7 referral bonus come from our marketing budget. "
+        "Instead of spending money on ads, we reward YOU directly for joining and referring friends. "
+        "Every new user = more orders = more revenue = we keep giving bonuses.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "✅ *Are The Services Real?*\n"
+        "100% real. Your orders go directly to SMMKings API — one of the most trusted SMM providers worldwide. "
+        "We are simply a Telegram-based interface. "
+        "You can verify any order ID on SMMKings directly.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🔒 *Why No Deposit System?*\n"
+        "We intentionally removed deposits to build trust. "
+        "New users can try our services completely risk-free with the signup bonus. "
+        "If you're satisfied, refer friends and earn more balance. Simple & transparent.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 _No hidden charges. No fake promises. Just real growth._",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
+            [InlineKeyboardButton("🛍️ Order Karo", callback_data="browse")],
+            [InlineKeyboardButton("🔙 Main Menu", callback_data="back_main")]
+        ])
+    )
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MAIN MENU
@@ -1255,6 +1295,7 @@ def main():
     app.add_handler(CallbackQueryHandler(track_order, pattern="^track_order$"))
     app.add_handler(CallbackQueryHandler(how_to_use, pattern="^how_to_use$"))
     app.add_handler(CallbackQueryHandler(refer_earn, pattern="^refer_earn$"))
+    app.add_handler(CallbackQueryHandler(why_free, pattern="^why_free$"))
     app.add_handler(CallbackQueryHandler(back_handler, pattern="^back_"))
 
     # Global message handler LAST mein — taaki ConversationHandler pehle handle kare
