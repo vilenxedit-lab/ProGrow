@@ -899,64 +899,54 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.edit_message_text("⏳ *Order place ho raha hai...*", parse_mode="Markdown")
 
-    # SMMKings pe order place karo
-    result = await place_order(s["service"], link, qty)
+    # Demo mode: fake order ID generate karo, API call nahi
+    smm_order_id = random.randint(10000000, 99999999)
+    deduct_balance(user.id, price)
 
-    if result and "order" in result:
-        smm_order_id = result["order"]
-        deduct_balance(user.id, price)
+    save_order(user.id, {
+        "smm_order_id": smm_order_id,
+        "service_id": s["service"],
+        "service_name": s["name"],
+        "link": link,
+        "quantity": qty,
+        "price": price,
+        "status": "pending"
+    })
 
-        save_order(user.id, {
-            "smm_order_id": smm_order_id,
-            "service_id": s["service"],
-            "service_name": s["name"],
-            "link": link,
-            "quantity": qty,
-            "price": price,
-            "status": "pending"
-        })
+    new_balance = get_user(user.id).get("balance", 0)
 
-        new_balance = get_user(user.id).get("balance", 0)
+    # Admin ko order notify karo
+    for admin_id in ADMIN_IDS:
+        if admin_id:
+            try:
+                await context.bot.send_message(
+                    admin_id,
+                    f"🛍️ *Naya Order!*\n\n"
+                    f"🔷 Service: {s['name']}\n"
+                    f"🔗 Link: {link}\n"
+                    f"🔢 Qty: {qty}\n"
+                    f"💰 Price: ₹{price}\n"
+                    f"🆔 SMM Order ID: {smm_order_id}",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                pass
 
-        # Admin ko order notify karo
-        for admin_id in ADMIN_IDS:
-            if admin_id:
-                try:
-                    await context.bot.send_message(
-                        admin_id,
-                        f"🛍️ *Naya Order!*\n\n"
-                        f"🔷 Service: {s['name']}\n"
-                        f"🔗 Link: {link}\n"
-                        f"🔢 Qty: {qty}\n"
-                        f"💰 Price: ₹{price}\n"
-                        f"🆔 SMM Order ID: {smm_order_id}",
-                        parse_mode="Markdown"
-                    )
-                except Exception:
-                    pass
-
-        await query.edit_message_text(
-            f"✅ *Order Successfully Place Ho Gaya!*\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🆔 *Order ID:* `{smm_order_id}`\n"
-            f"🔷 *Service:* {s['name']}\n"
-            f"🔢 *Quantity:* {qty}\n"
-            f"💰 *Charged:* ₹{price}\n"
-            f"💳 *Remaining Balance:* ₹{new_balance:.2f}\n"
-            f"📊 *Status:* ⏳ Pending\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"⏰ Delivery shuru ho jaayegi jaldi!\n"
-            f"Status check ke liye 'Track Order' use karein.",
-            parse_mode="Markdown",
-            reply_markup=main_menu_keyboard()
-        )
-    else:
-        error = result.get("error", "Unknown error") if result else "API error"
-        await query.edit_message_text(
-            f"❌ *Order Failed!*\n\nError: `{error}`\n\nDobara try karein.",
-            parse_mode="Markdown",
-            reply_markup=main_menu_keyboard()
-        )
+    await query.edit_message_text(
+        f"✅ *Order Successfully Place Ho Gaya!*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 *Order ID:* `{smm_order_id}`\n"
+        f"🔷 *Service:* {s['name']}\n"
+        f"🔢 *Quantity:* {qty}\n"
+        f"💰 *Charged:* ₹{price}\n"
+        f"💳 *Remaining Balance:* ₹{new_balance:.2f}\n"
+        f"📊 *Status:* ⏳ Pending\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⏰ Delivery shuru ho jaayegi jaldi!\n"
+        f"Status check ke liye 'Track Order' use karein.",
+        parse_mode="Markdown",
+        reply_markup=main_menu_keyboard()
+    )
 
     return ConversationHandler.END
 
