@@ -977,22 +977,55 @@ async def my_balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    user_data = get_user(update.effective_user.id)
+    uid = update.effective_user.id
+    user_data = get_user(uid)
     balance = user_data.get("balance", 0)
-    ref_count = get_referral_count(update.effective_user.id)
+    signup_bonus = SIGNUP_BONUS if user_data.get("signup_bonus_given") else 0
+
+    ref_count = get_referral_count(uid)
+    referral_earnings = round(ref_count * REFERRAL_BONUS, 2)
+    total_earned = round(signup_bonus + referral_earnings, 2)
 
     col = get_col("orders")
-    total_orders = col.count_documents({"user_id": str(update.effective_user.id)}) if col else 0
+    total_orders = col.count_documents({"user_id": str(uid)}) if col is not None else 0
+
+    # Total spent calculate karo
+    total_spent = 0
+    if col is not None:
+        pipeline = [
+            {"$match": {"user_id": str(uid)}},
+            {"$group": {"_id": None, "total": {"$sum": "$price"}}}
+        ]
+        result = list(col.aggregate(pipeline))
+        if result:
+            total_spent = round(result[0]["total"], 2)
+
+    # Pending referrals count
+    ref_col = get_col("referrals")
+    pending_refs = 0
+    if ref_col is not None:
+        pending_refs = ref_col.count_documents({"referrer_id": str(uid), "bonus_paid": False})
 
     await query.edit_message_text(
-        f"💰 *My Wallet*\n\n"
+        f"👤 *My Account*\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💵 *Current Balance:* ₹{balance:.2f}\n"
-        f"📦 *Total Orders:* {total_orders}\n"
-        f"🤝 *Successful Referrals:* {ref_count}\n"
-        f"💸 *Referral Earnings:* ₹{ref_count * REFERRAL_BONUS:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"💡 _Refer karein aur aur balance earn karein!_",
+        f"💰 *WALLET*\n"
+        f"💵 Current Balance: *₹{balance:.2f}*\n"
+        f"📈 Total Earned: *₹{total_earned:.2f}*\n"
+        f"📉 Total Spent: *₹{total_spent:.2f}*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎁 *BONUSES*\n"
+        f"✅ Signup Bonus: *₹{signup_bonus:.2f}*\n"
+        f"👥 Referral Earnings: *₹{referral_earnings:.2f}*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"👥 *REFERRALS*\n"
+        f"✅ Successful Referrals: *{ref_count}*\n"
+        f"⏳ Pending Referrals: *{pending_refs}*\n"
+        f"💸 Per Referral Bonus: *₹{REFERRAL_BONUS:.0f}*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📦 *ORDERS*\n"
+        f"🛍️ Total Orders Placed: *{total_orders}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")],
@@ -1094,9 +1127,7 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"2️⃣ *Refer & Earn* — Dosto ko refer karo, ₹7/referral pao\n"
         f"3️⃣ *Order* — Link & quantity enter karo (min ₹50)\n"
         f"4️⃣ *Track Order* — Status check karo\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📞 *Contact Admin:* @NexusXedit\n\n"
-        f"*Support ke liye admin se contact karein!*",
+        f"━━━━━━━━━━━━━━━━━━━━",
         parse_mode="Markdown",
         reply_markup=back_keyboard()
     )
