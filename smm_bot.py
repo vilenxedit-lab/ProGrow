@@ -18,7 +18,7 @@ import asyncio
 import aiohttp
 from datetime import datetime
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, ConversationHandler, filters
@@ -548,14 +548,15 @@ async def global_message_handler(update: Update, context: ContextTypes.DEFAULT_T
     user = update.effective_user
     user_doc = get_user(user.id)
 
-    # Agar ConversationHandler ENTER_LINK state mein hai to ignore karo
-    # (link wahan handle hoga)
+    # Agar selected_service hai aur order_link nahi — ENTER_LINK state mein hai
+    # ConversationHandler handle karega, global handler ignore kare
     if context.user_data.get("selected_service") and not context.user_data.get("order_link"):
         return
 
-    # Agar already verified hai to ignore karo
-    if user_doc.get("joined") and user_doc.get("signup_bonus_given"):
-        return
+    # Agar awaiting_quantity nahi aur already verified hai to ignore karo
+    if not context.user_data.get("awaiting_quantity"):
+        if user_doc.get("joined") and user_doc.get("signup_bonus_given"):
+            return
 
     # Quantity awaiting hai? (qty_custom ke baad)
     if context.user_data.get("awaiting_quantity"):
@@ -582,15 +583,10 @@ async def global_message_handler(update: Update, context: ContextTypes.DEFAULT_T
         context.user_data["awaiting_quantity"] = False
 
         if qty < min_qty or qty > max_qty:
-            suggestions = sorted(list(set([q for q in [min_qty, 500, 1000, 2000, 5000, 10000] if min_qty <= q <= max_qty])))[:6]
-            reply_kb = ReplyKeyboardMarkup(
-                [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
-                resize_keyboard=True, one_time_keyboard=True
-            )
             await update.message.reply_text(
                 f"❌ *Invalid!* {min_qty} aur {max_qty} ke beech enter karo:",
                 parse_mode="Markdown",
-                reply_markup=reply_kb
+                reply_markup=ReplyKeyboardRemove()
             )
             context.user_data["awaiting_quantity"] = True
             return
@@ -1202,15 +1198,10 @@ async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["awaiting_quantity"] = False
 
     if qty < min_qty or qty > max_qty:
-        suggestions = sorted(list(set([q for q in [min_qty, 500, 1000, 2000, 5000, 10000] if min_qty <= q <= max_qty])))[:6]
-        reply_kb = ReplyKeyboardMarkup(
-            [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
-            resize_keyboard=True, one_time_keyboard=True
-        )
         await update.message.reply_text(
             f"❌ *Invalid!* {min_qty} aur {max_qty} ke beech enter karo:",
             parse_mode="Markdown",
-            reply_markup=reply_kb
+            reply_markup=ReplyKeyboardRemove()
         )
         return ENTER_QUANTITY
 
