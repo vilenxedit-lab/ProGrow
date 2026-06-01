@@ -548,6 +548,11 @@ async def global_message_handler(update: Update, context: ContextTypes.DEFAULT_T
     user = update.effective_user
     user_doc = get_user(user.id)
 
+    # Agar ConversationHandler ENTER_LINK state mein hai to ignore karo
+    # (link wahan handle hoga)
+    if context.user_data.get("selected_service") and not context.user_data.get("order_link"):
+        return
+
     # Agar already verified hai to ignore karo
     if user_doc.get("joined") and user_doc.get("signup_bonus_given"):
         return
@@ -1152,43 +1157,14 @@ async def enter_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["order_link"] = link
 
     s = context.user_data.get("selected_service", {})
-    min_qty = s.get("min", 10)
-    max_qty = s.get("max", 10000)
-
-    s = context.user_data.get("selected_service", {})
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
     user = get_user(update.effective_user.id)
     balance = user.get("balance", 0)
 
-    # Quick quantity buttons banao
-    def qty_keyboard(selected_qty=None, rate=None):
-        quick_qtys = [min_qty, 500, 1000, 2000, 5000, 10000]
-        # Filter valid quantities
-        quick_qtys = [q for q in quick_qtys if min_qty <= q <= max_qty]
-        # Remove duplicates & sort
-        quick_qtys = sorted(list(set(quick_qtys)))[:6]
-
-        buttons = []
-        row = []
-        for q in quick_qtys:
-            price = calculate_price(s.get("rate", 0), q)
-            label = f"{q} — ₹{price:.1f}"
-            if selected_qty == q:
-                label = f"✅ {label}"
-            row.append(InlineKeyboardButton(label, callback_data=f"qty_{q}"))
-            if len(row) == 2:
-                buttons.append(row)
-                row = []
-        if row:
-            buttons.append(row)
-
-        buttons.append([InlineKeyboardButton("✏️ Custom Quantity Type Karo", callback_data="qty_custom")])
-        buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"cat_{context.user_data.get('current_category', '')[:30]}")])
-        return InlineKeyboardMarkup(buttons)
-
-    # Calculator dikhao
     context.user_data["calc_input"] = ""
     kb = calc_keyboard("", s, balance)
-    
+
     await update.message.reply_text(
         f"✅ *Link Accepted!*\n"
         f"_⚠️ Once order is placed, balance cannot be refunded._\n\n"
@@ -1677,287 +1653,7 @@ async def back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  INLINE NUMBER PAD CALCULATOR
-# ═══════════════════════════════════════════════════════════════════════════════
-def calc_keyboard(current_input, service, balance):
-    """Calculator style inline keyboard"""
-    s = service
-    rate = s.get("rate", 0)
-    min_qty = int(s.get("min", 10))
-    max_qty = int(s.get("max", 10000))
-    
-    qty = int(current_input) if current_input else 0
-    price = calculate_price(rate, qty) if qty > 0 else 0.0
-    
-    # Status
-    if qty == 0:
-        status = "👆 Number type karo"
-        can_order = False
-    elif qty < min_qty:
-        status = f"⚠️ Min {min_qty} chahiye"
-        can_order = False
-    elif qty > max_qty:
-        status = f"⚠️ Max {max_qty} tak hi"
-        can_order = False
-    elif price < MIN_ORDER_AMOUNT:
-        status = f"⚠️ Min ₹{MIN_ORDER_AMOUNT:.0f} ka order"
-        can_order = False
-    elif balance < price:
-        needed = round(price - balance, 2)
-        status = f"❌ ₹{needed} aur chahiye"
-        can_order = False
-    else:
-        status = "✅ Order place kar sakte ho!"
-        can_order = True
-
-    display = current_input if current_input else "0"
-    
-    buttons = [
-        # Display row
-        [InlineKeyboardButton(
-            f"📊 Qty: {display}  |  💰 ₹{price:.2f}  |  {status}",
-            callback_data="calc_noop"
-        )],
-        # Number pad
-        [
-            InlineKeyboardButton("1", callback_data=f"calc_1"),
-            InlineKeyboardButton("2", callback_data=f"calc_2"),
-            InlineKeyboardButton("3", callback_data=f"calc_3"),
-        ],
-        [
-            InlineKeyboardButton("4", callback_data=f"calc_4"),
-            InlineKeyboardButton("5", callback_data=f"calc_5"),
-            InlineKeyboardButton("6", callback_data=f"calc_6"),
-        ],
-        [
-            InlineKeyboardButton("7", callback_data=f"calc_7"),
-            InlineKeyboardButton("8", callback_data=f"calc_8"),
-            InlineKeyboardButton("9", callback_data=f"calc_9"),
-        ],
-        [
-            InlineKeyboardButton("⌫ Delete", callback_data="calc_del"),
-            InlineKeyboardButton("0", callback_data=f"calc_0"),
-            InlineKeyboardButton("000", callback_data=f"calc_000"),
-        ],
-    ]
-    
-    if can_order:
-        buttons.append([InlineKeyboardButton(
-            f"✅ Place Order — ₹{price:.2f}", callback_data=f"confirm_qty_{qty}"
-        )])
-    else:
-        buttons.append([InlineKeyboardButton(
-            "👥 Refer & Earn — Balance Badhao" if qty > 0 and price > 0 and price >= MIN_ORDER_AMOUNT else "ℹ️ Quantity Enter Karo",
-            callback_data="refer_earn" if qty > 0 and price >= MIN_ORDER_AMOUNT and balance < price else "calc_noop"
-        )])
-    
-    buttons.append([
-        InlineKeyboardButton("🔄 Clear", callback_data="calc_clear"),
-        InlineKeyboardButton("🔙 Back", callback_data="browse")
-    ])
-    
-    return InlineKeyboardMarkup(buttons)
-
-async def show_calculator(update, context, current_input=""):
-    """Calculator message show/update karo"""
-    s = context.user_data.get("selected_service", {})
-    user = get_user(update.effective_user if hasattr(update, 'effective_user') else update.callback_query.from_user)
-    if isinstance(user, dict):
-        balance = user.get("balance", 0)
-    else:
-        balance = 0
-    
-    kb = calc_keyboard(current_input, s, balance)
-    min_qty = int(s.get("min", 10))
-    max_qty = int(s.get("max", 10000))
-    
-    text = (
-        f"🖩 *Quantity Calculator*\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔷 {s.get('name', '')[:40]}\n"
-        f"💳 Balance: ₹{balance:.2f}\n"
-        f"📉 Min: {min_qty} | 📈 Max: {max_qty}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"_Numbers dabao 👇_"
-    )
-    return text, kb
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  QUANTITY CALCULATOR — Live price keyboard
-# ═══════════════════════════════════════════════════════════════════════════════
-async def calc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Calculator number pad buttons handle karo"""
-    query = update.callback_query
-    await query.answer()
-    
-    data = query.data  # calc_1, calc_del, calc_clear, calc_noop
-    
-    if data == "calc_noop":
-        return CALC_QUANTITY
-    
-    current = context.user_data.get("calc_input", "")
-    
-    if data == "calc_clear":
-        current = ""
-    elif data == "calc_del":
-        current = current[:-1]
-    elif data == "calc_000":
-        current = current + "000" if current else ""
-    else:
-        digit = data.replace("calc_", "")
-        if len(current) < 6:  # Max 6 digits
-            current = current + digit
-        # Remove leading zeros
-        current = str(int(current)) if current else ""
-    
-    context.user_data["calc_input"] = current
-    
-    s = context.user_data.get("selected_service", {})
-    user_doc = get_user(update.effective_user.id)
-    balance = user_doc.get("balance", 0)
-    min_qty = int(s.get("min", 10))
-    max_qty = int(s.get("max", 10000))
-    
-    kb = calc_keyboard(current, s, balance)
-    
-    try:
-        await query.edit_message_reply_markup(reply_markup=kb)
-    except Exception:
-        pass
-    
-    return CALC_QUANTITY
-
-async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Quick quantity button dabaya"""
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data  # qty_100, qty_500, qty_custom
-
-    s = context.user_data.get("selected_service", {})
-    min_qty = int(s.get("min", 10))
-    max_qty = int(s.get("max", 10000))
-    user = get_user(update.effective_user.id)
-    balance = user.get("balance", 0)
-
-    if data == "qty_custom":
-        s2 = context.user_data.get("selected_service", {})
-        min_qty2 = int(s2.get("min", 10))
-        max_qty2 = int(s2.get("max", 10000))
-
-        # Calculator reset karke dikhao
-        context.user_data["calc_input"] = ""
-        s2 = context.user_data.get("selected_service", {})
-        user2 = get_user(update.effective_user.id)
-        balance2 = user2.get("balance", 0)
-        kb = calc_keyboard("", s2, balance2)
-        
-        await query.edit_message_text(
-            f"🖩 *Quantity Calculator*\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🔷 {s2.get('name', '')[:40]}\n"
-            f"💳 Balance: ₹{balance2:.2f}\n"
-            f"📉 Min: {min_qty2} | 📈 Max: {max_qty2}\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"_Numbers dabao 👇_",
-            parse_mode="Markdown",
-            reply_markup=kb
-        )
-        return CALC_QUANTITY
-
-    qty = int(data.replace("qty_", ""))
-    total_price = calculate_price(s["rate"], qty)
-
-    # Live price update keyboard
-    quick_qtys = [min_qty, 500, 1000, 2000, 5000, 10000]
-    quick_qtys = sorted(list(set([q for q in quick_qtys if min_qty <= q <= max_qty])))[:6]
-
-    buttons = []
-    row = []
-    for q in quick_qtys:
-        price = calculate_price(s.get("rate", 0), q)
-        label = f"✅ {q} — ₹{price:.1f}" if q == qty else f"{q} — ₹{price:.1f}"
-        row.append(InlineKeyboardButton(label, callback_data=f"qty_{q}"))
-        if len(row) == 2:
-            buttons.append(row)
-            row = []
-    if row:
-        buttons.append(row)
-
-    # Status line
-    if total_price < MIN_ORDER_AMOUNT:
-        status = f"⚠️ Min order ₹{MIN_ORDER_AMOUNT:.0f} — quantity badhao!"
-        can_order = False
-    elif balance < total_price:
-        needed = round(total_price - balance, 2)
-        status = f"❌ ₹{needed} aur chahiye"
-        can_order = False
-    else:
-        status = f"✅ Balance sufficient!"
-        can_order = True
-
-    if can_order:
-        buttons.append([InlineKeyboardButton(f"✅ Confirm — ₹{total_price:.2f}", callback_data=f"confirm_qty_{qty}")])
-    else:
-        buttons.append([InlineKeyboardButton("👥 Refer & Earn — Balance Badhao", callback_data="refer_earn")])
-
-    buttons.append([InlineKeyboardButton("✏️ Custom Quantity", callback_data="qty_custom")])
-    buttons.append([InlineKeyboardButton("🔙 Back", callback_data="browse")])
-
-    await query.edit_message_text(
-        f"📊 *Live Price Calculator*\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔷 *Service:* {s['name'][:35]}\n"
-        f"🔢 *Selected Qty:* {qty}\n"
-        f"💰 *Price:* ₹{total_price:.2f}\n"
-        f"💳 *Your Balance:* ₹{balance:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"{status}",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
-    return CALC_QUANTITY
-
-async def confirm_qty_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Confirm button directly from calculator"""
-    query = update.callback_query
-    await query.answer()
-
-    qty = int(query.data.replace("confirm_qty_", ""))
-    s = context.user_data.get("selected_service", {})
-    total_price = calculate_price(s["rate"], qty)
-
-    context.user_data["order_qty"] = qty
-    context.user_data["order_price"] = total_price
-
-    user = get_user(update.effective_user.id)
-    balance = user.get("balance", 0)
-
-    if balance < total_price:
-        needed = round(total_price - balance, 2)
-        await query.answer(f"❌ Balance kam hai! ₹{needed} aur chahiye.", show_alert=True)
-        return CALC_QUANTITY
-
-    await query.edit_message_text(
-        f"📋 *Order Summary*\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔷 *Service:* {s['name']}\n"
-        f"🔗 *Link:* `{context.user_data.get('order_link', '')}`\n"
-        f"🔢 *Quantity:* {qty}\n"
-        f"💰 *Total Price:* ₹{total_price:.2f}\n"
-        f"💳 *Balance:* ₹{balance:.2f}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"✅ *Balance sufficient!* Confirm karein?",
-        parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("✅ Place Order", callback_data="confirm_order")],
-            [InlineKeyboardButton("🔙 Back", callback_data="browse")]
-        ])
-    )
-    return CONFIRM_ORDER
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  GLOBAL MESSAGE HANDLER — Captcha ke liye (session-safe)
+#  MAIN
 # ═══════════════════════════════════════════════════════════════════════════════
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
