@@ -18,7 +18,7 @@ import asyncio
 import aiohttp
 from datetime import datetime
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, ConversationHandler, filters
@@ -277,13 +277,30 @@ async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     balance = user.get("balance", 0)
 
     if data == "qty_custom":
-        await query.edit_message_text(
-            f"✏️ *Custom Quantity Enter Karo*\n\n"
-            f"💳 *Aapka Balance:* ₹{balance:.2f}\n"
-            f"📉 *Min:* {min_qty} | 📈 *Max:* {max_qty}\n\n"
-            f"_Sirf number type karo:_",
-            parse_mode="Markdown"
+        s2 = context.user_data.get("selected_service", {})
+        min_qty2 = int(s2.get("min", 10))
+        max_qty2 = int(s2.get("max", 10000))
+
+        # Quick suggestion buttons as Reply Keyboard
+        suggestions = [min_qty2, 500, 1000, 2000, 5000, 10000]
+        suggestions = sorted(list(set([q for q in suggestions if min_qty2 <= q <= max_qty2])))[:6]
+
+        reply_kb = ReplyKeyboardMarkup(
+            [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            input_field_placeholder=f"Min {min_qty2} - Max {max_qty2}"
         )
+
+        await query.message.reply_text(
+            f"✏️ *Quantity Enter Karo*\n\n"
+            f"💳 *Balance:* ₹{balance:.2f}\n"
+            f"📉 *Min:* {min_qty2} | 📈 *Max:* {max_qty2}\n\n"
+            f"_Neeche se select karo ya khud type karo:_",
+            parse_mode="Markdown",
+            reply_markup=reply_kb
+        )
+        context.user_data["awaiting_quantity"] = True
         return ENTER_QUANTITY
 
     qty = int(data.replace("qty_", ""))
@@ -387,6 +404,97 @@ async def global_message_handler(update: Update, context: ContextTypes.DEFAULT_T
 
     # Agar already verified hai to ignore karo
     if user_doc.get("joined") and user_doc.get("signup_bonus_given"):
+        return
+
+    # Quantity awaiting hai? (qty_custom ke baad)
+    if context.user_data.get("awaiting_quantity"):
+        text = update.message.text.strip()
+        try:
+            qty = int(text)
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Sirf number type karo!",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            return
+
+        s = context.user_data.get("selected_service", {})
+        if not s:
+            context.user_data["awaiting_quantity"] = False
+            return
+
+        min_qty = int(s.get("min", 10))
+        max_qty = int(s.get("max", 10000))
+        user2 = get_user(user.id)
+        balance = user2.get("balance", 0)
+        total_price = calculate_price(s["rate"], qty)
+        context.user_data["awaiting_quantity"] = False
+
+        if qty < min_qty or qty > max_qty:
+            suggestions = sorted(list(set([q for q in [min_qty, 500, 1000, 2000, 5000, 10000] if min_qty <= q <= max_qty])))[:6]
+            reply_kb = ReplyKeyboardMarkup(
+                [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
+                resize_keyboard=True, one_time_keyboard=True
+            )
+            await update.message.reply_text(
+                f"❌ *Invalid!* {min_qty} aur {max_qty} ke beech enter karo:",
+                parse_mode="Markdown",
+                reply_markup=reply_kb
+            )
+            context.user_data["awaiting_quantity"] = True
+            return
+
+        context.user_data["order_qty"] = qty
+        context.user_data["order_price"] = total_price
+
+        # Status
+        if total_price < MIN_ORDER_AMOUNT:
+            status_line = f"⚠️ Min order ₹{MIN_ORDER_AMOUNT:.0f} — quantity badhao!"
+            can_order = False
+        elif balance < total_price:
+            needed = round(total_price - balance, 2)
+            status_line = f"❌ ₹{needed} aur chahiye"
+            can_order = False
+        else:
+            status_line = "✅ Balance sufficient!"
+            can_order = True
+
+        quick_qtys = sorted(list(set([q for q in [min_qty, 500, 1000, 2000, 5000, 10000] if min_qty <= q <= max_qty])))[:6]
+        buttons = []
+        row = []
+        for q in quick_qtys:
+            price = calculate_price(s.get("rate", 0), q)
+            label = f"✅ {q} — ₹{price:.1f}" if q == qty else f"{q} — ₹{price:.1f}"
+            row.append(InlineKeyboardButton(label, callback_data=f"qty_{q}"))
+            if len(row) == 2:
+                buttons.append(row)
+                row = []
+        if row:
+            buttons.append(row)
+
+        if can_order:
+            buttons.append([InlineKeyboardButton(f"✅ Confirm — ₹{total_price:.2f}", callback_data=f"confirm_qty_{qty}")])
+        else:
+            if total_price < MIN_ORDER_AMOUNT:
+                buttons.append([InlineKeyboardButton("🔄 Order Again", callback_data=f"svc_{s.get('service', '')}")])
+            else:
+                buttons.append([InlineKeyboardButton("👥 Refer & Earn", callback_data="refer_earn")])
+
+        buttons.append([InlineKeyboardButton("✏️ Custom Quantity", callback_data="qty_custom")])
+        buttons.append([InlineKeyboardButton("🔙 Back", callback_data="browse")])
+
+        await update.message.reply_text(
+            f"📊 *Live Price Calculator*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔷 *Service:* {s['name'][:35]}\n"
+            f"🔢 *Qty:* {qty}\n"
+            f"💰 *Price:* ₹{total_price:.2f}\n"
+            f"💳 *Balance:* ₹{balance:.2f}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"{status_line}",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
         return
 
     # Captcha pending hai?
@@ -954,7 +1062,8 @@ async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text(
             "❌ *Sirf number enter karein!*\n\nExample: `1000`",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove()
         )
         return ENTER_QUANTITY
 
@@ -965,12 +1074,19 @@ async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     balance = user.get("balance", 0)
     total_price = calculate_price(s["rate"], qty)
 
+    # Reply keyboard remove karo
+    context.user_data["awaiting_quantity"] = False
+
     if qty < min_qty or qty > max_qty:
+        suggestions = sorted(list(set([q for q in [min_qty, 500, 1000, 2000, 5000, 10000] if min_qty <= q <= max_qty])))[:6]
+        reply_kb = ReplyKeyboardMarkup(
+            [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
+            resize_keyboard=True, one_time_keyboard=True
+        )
         await update.message.reply_text(
-            f"❌ *Invalid Quantity!*\n\n"
-            f"📉 Min: *{min_qty}* | 📈 Max: *{max_qty}*\n\n"
-            f"Dobara try karein:",
-            parse_mode="Markdown"
+            f"❌ *Invalid!* {min_qty} aur {max_qty} ke beech enter karo:",
+            parse_mode="Markdown",
+            reply_markup=reply_kb
         )
         return ENTER_QUANTITY
 
@@ -1429,13 +1545,30 @@ async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     balance = user.get("balance", 0)
 
     if data == "qty_custom":
-        await query.edit_message_text(
-            f"✏️ *Custom Quantity Enter Karo*\n\n"
-            f"💳 *Aapka Balance:* ₹{balance:.2f}\n"
-            f"📉 *Min:* {min_qty} | 📈 *Max:* {max_qty}\n\n"
-            f"_Sirf number type karo:_",
-            parse_mode="Markdown"
+        s2 = context.user_data.get("selected_service", {})
+        min_qty2 = int(s2.get("min", 10))
+        max_qty2 = int(s2.get("max", 10000))
+
+        # Quick suggestion buttons as Reply Keyboard
+        suggestions = [min_qty2, 500, 1000, 2000, 5000, 10000]
+        suggestions = sorted(list(set([q for q in suggestions if min_qty2 <= q <= max_qty2])))[:6]
+
+        reply_kb = ReplyKeyboardMarkup(
+            [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
+            resize_keyboard=True,
+            one_time_keyboard=True,
+            input_field_placeholder=f"Min {min_qty2} - Max {max_qty2}"
         )
+
+        await query.message.reply_text(
+            f"✏️ *Quantity Enter Karo*\n\n"
+            f"💳 *Balance:* ₹{balance:.2f}\n"
+            f"📉 *Min:* {min_qty2} | 📈 *Max:* {max_qty2}\n\n"
+            f"_Neeche se select karo ya khud type karo:_",
+            parse_mode="Markdown",
+            reply_markup=reply_kb
+        )
+        context.user_data["awaiting_quantity"] = True
         return ENTER_QUANTITY
 
     qty = int(data.replace("qty_", ""))
