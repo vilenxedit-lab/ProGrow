@@ -18,7 +18,7 @@ import asyncio
 import aiohttp
 from datetime import datetime
 from pymongo import MongoClient
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application, CommandHandler, CallbackQueryHandler,
     MessageHandler, ContextTypes, ConversationHandler, filters
@@ -261,8 +261,156 @@ def channel_join_keyboard():
     ])
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  INLINE NUMBER PAD CALCULATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+def calc_keyboard(current_input, service, balance):
+    """Calculator style inline keyboard"""
+    s = service
+    rate = s.get("rate", 0)
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
+    
+    qty = int(current_input) if current_input else 0
+    price = calculate_price(rate, qty) if qty > 0 else 0.0
+    
+    # Status
+    if qty == 0:
+        status = "👆 Number type karo"
+        can_order = False
+    elif qty < min_qty:
+        status = f"⚠️ Min {min_qty} chahiye"
+        can_order = False
+    elif qty > max_qty:
+        status = f"⚠️ Max {max_qty} tak hi"
+        can_order = False
+    elif price < MIN_ORDER_AMOUNT:
+        status = f"⚠️ Min ₹{MIN_ORDER_AMOUNT:.0f} ka order"
+        can_order = False
+    elif balance < price:
+        needed = round(price - balance, 2)
+        status = f"❌ ₹{needed} aur chahiye"
+        can_order = False
+    else:
+        status = "✅ Order place kar sakte ho!"
+        can_order = True
+
+    display = current_input if current_input else "0"
+    
+    buttons = [
+        # Display row
+        [InlineKeyboardButton(
+            f"📊 Qty: {display}  |  💰 ₹{price:.2f}  |  {status}",
+            callback_data="calc_noop"
+        )],
+        # Number pad
+        [
+            InlineKeyboardButton("1", callback_data=f"calc_1"),
+            InlineKeyboardButton("2", callback_data=f"calc_2"),
+            InlineKeyboardButton("3", callback_data=f"calc_3"),
+        ],
+        [
+            InlineKeyboardButton("4", callback_data=f"calc_4"),
+            InlineKeyboardButton("5", callback_data=f"calc_5"),
+            InlineKeyboardButton("6", callback_data=f"calc_6"),
+        ],
+        [
+            InlineKeyboardButton("7", callback_data=f"calc_7"),
+            InlineKeyboardButton("8", callback_data=f"calc_8"),
+            InlineKeyboardButton("9", callback_data=f"calc_9"),
+        ],
+        [
+            InlineKeyboardButton("⌫ Delete", callback_data="calc_del"),
+            InlineKeyboardButton("0", callback_data=f"calc_0"),
+            InlineKeyboardButton("000", callback_data=f"calc_000"),
+        ],
+    ]
+    
+    if can_order:
+        buttons.append([InlineKeyboardButton(
+            f"✅ Place Order — ₹{price:.2f}", callback_data=f"confirm_qty_{qty}"
+        )])
+    else:
+        buttons.append([InlineKeyboardButton(
+            "👥 Refer & Earn — Balance Badhao" if qty > 0 and price > 0 and price >= MIN_ORDER_AMOUNT else "ℹ️ Quantity Enter Karo",
+            callback_data="refer_earn" if qty > 0 and price >= MIN_ORDER_AMOUNT and balance < price else "calc_noop"
+        )])
+    
+    buttons.append([
+        InlineKeyboardButton("🔄 Clear", callback_data="calc_clear"),
+        InlineKeyboardButton("🔙 Back", callback_data="browse")
+    ])
+    
+    return InlineKeyboardMarkup(buttons)
+
+async def show_calculator(update, context, current_input=""):
+    """Calculator message show/update karo"""
+    s = context.user_data.get("selected_service", {})
+    user = get_user(update.effective_user if hasattr(update, 'effective_user') else update.callback_query.from_user)
+    if isinstance(user, dict):
+        balance = user.get("balance", 0)
+    else:
+        balance = 0
+    
+    kb = calc_keyboard(current_input, s, balance)
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
+    
+    text = (
+        f"🖩 *Quantity Calculator*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔷 {s.get('name', '')[:40]}\n"
+        f"💳 Balance: ₹{balance:.2f}\n"
+        f"📉 Min: {min_qty} | 📈 Max: {max_qty}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Numbers dabao 👇_"
+    )
+    return text, kb
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  QUANTITY CALCULATOR — Live price keyboard
 # ═══════════════════════════════════════════════════════════════════════════════
+async def calc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Calculator number pad buttons handle karo"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data  # calc_1, calc_del, calc_clear, calc_noop
+    
+    if data == "calc_noop":
+        return CALC_QUANTITY
+    
+    current = context.user_data.get("calc_input", "")
+    
+    if data == "calc_clear":
+        current = ""
+    elif data == "calc_del":
+        current = current[:-1]
+    elif data == "calc_000":
+        current = current + "000" if current else ""
+    else:
+        digit = data.replace("calc_", "")
+        if len(current) < 6:  # Max 6 digits
+            current = current + digit
+        # Remove leading zeros
+        current = str(int(current)) if current else ""
+    
+    context.user_data["calc_input"] = current
+    
+    s = context.user_data.get("selected_service", {})
+    user_doc = get_user(update.effective_user.id)
+    balance = user_doc.get("balance", 0)
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
+    
+    kb = calc_keyboard(current, s, balance)
+    
+    try:
+        await query.edit_message_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+    
+    return CALC_QUANTITY
+
 async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Quick quantity button dabaya"""
     query = update.callback_query
@@ -281,27 +429,25 @@ async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         min_qty2 = int(s2.get("min", 10))
         max_qty2 = int(s2.get("max", 10000))
 
-        # Quick suggestion buttons as Reply Keyboard
-        suggestions = [min_qty2, 500, 1000, 2000, 5000, 10000]
-        suggestions = sorted(list(set([q for q in suggestions if min_qty2 <= q <= max_qty2])))[:6]
-
-        reply_kb = ReplyKeyboardMarkup(
-            [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
-            resize_keyboard=True,
-            one_time_keyboard=True,
-            input_field_placeholder=f"Min {min_qty2} - Max {max_qty2}"
-        )
-
-        await query.message.reply_text(
-            f"✏️ *Quantity Enter Karo*\n\n"
-            f"💳 *Balance:* ₹{balance:.2f}\n"
-            f"📉 *Min:* {min_qty2} | 📈 *Max:* {max_qty2}\n\n"
-            f"_Neeche se select karo ya khud type karo:_",
+        # Calculator reset karke dikhao
+        context.user_data["calc_input"] = ""
+        s2 = context.user_data.get("selected_service", {})
+        user2 = get_user(update.effective_user.id)
+        balance2 = user2.get("balance", 0)
+        kb = calc_keyboard("", s2, balance2)
+        
+        await query.edit_message_text(
+            f"🖩 *Quantity Calculator*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔷 {s2.get('name', '')[:40]}\n"
+            f"💳 Balance: ₹{balance2:.2f}\n"
+            f"📉 Min: {min_qty2} | 📈 Max: {max_qty2}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Numbers dabao 👇_",
             parse_mode="Markdown",
-            reply_markup=reply_kb
+            reply_markup=kb
         )
-        context.user_data["awaiting_quantity"] = True
-        return ENTER_QUANTITY
+        return CALC_QUANTITY
 
     qty = int(data.replace("qty_", ""))
     total_price = calculate_price(s["rate"], qty)
@@ -1039,21 +1185,23 @@ async def enter_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
         buttons.append([InlineKeyboardButton("🔙 Back", callback_data=f"cat_{context.user_data.get('current_category', '')[:30]}")])
         return InlineKeyboardMarkup(buttons)
 
-    context.user_data["qty_keyboard_func"] = True  # flag
-    price_preview = calculate_price(s.get("rate", 0), min_qty)
-
+    # Calculator dikhao
+    context.user_data["calc_input"] = ""
+    kb = calc_keyboard("", s, balance)
+    
     await update.message.reply_text(
-        f"✅ *Link Accepted!*\n\n"
-        f"⚠️ *DISCLAIMER:* _Once order is placed, balance cannot be refunded._\n\n"
+        f"✅ *Link Accepted!*\n"
+        f"_⚠️ Once order is placed, balance cannot be refunded._\n\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 *Live Price Calculator*\n\n"
-        f"💳 *Aapka Balance:* ₹{balance:.2f}\n"
-        f"📉 *Min:* {min_qty} | 📈 *Max:* {max_qty}\n\n"
-        f"_Quantity select karo ya custom type karo 👇_",
+        f"🖩 *Quantity Calculator*\n\n"
+        f"🔷 {s.get('name', '')[:40]}\n"
+        f"💳 Balance: ₹{balance:.2f}\n"
+        f"📉 Min: {min_qty} | 📈 Max: {max_qty}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Numbers dabao 👇_",
         parse_mode="Markdown",
-        reply_markup=qty_keyboard()
+        reply_markup=kb
     )
-
     return CALC_QUANTITY
 
 async def enter_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1529,8 +1677,156 @@ async def back_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # ═══════════════════════════════════════════════════════════════════════════════
+#  INLINE NUMBER PAD CALCULATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+def calc_keyboard(current_input, service, balance):
+    """Calculator style inline keyboard"""
+    s = service
+    rate = s.get("rate", 0)
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
+    
+    qty = int(current_input) if current_input else 0
+    price = calculate_price(rate, qty) if qty > 0 else 0.0
+    
+    # Status
+    if qty == 0:
+        status = "👆 Number type karo"
+        can_order = False
+    elif qty < min_qty:
+        status = f"⚠️ Min {min_qty} chahiye"
+        can_order = False
+    elif qty > max_qty:
+        status = f"⚠️ Max {max_qty} tak hi"
+        can_order = False
+    elif price < MIN_ORDER_AMOUNT:
+        status = f"⚠️ Min ₹{MIN_ORDER_AMOUNT:.0f} ka order"
+        can_order = False
+    elif balance < price:
+        needed = round(price - balance, 2)
+        status = f"❌ ₹{needed} aur chahiye"
+        can_order = False
+    else:
+        status = "✅ Order place kar sakte ho!"
+        can_order = True
+
+    display = current_input if current_input else "0"
+    
+    buttons = [
+        # Display row
+        [InlineKeyboardButton(
+            f"📊 Qty: {display}  |  💰 ₹{price:.2f}  |  {status}",
+            callback_data="calc_noop"
+        )],
+        # Number pad
+        [
+            InlineKeyboardButton("1", callback_data=f"calc_1"),
+            InlineKeyboardButton("2", callback_data=f"calc_2"),
+            InlineKeyboardButton("3", callback_data=f"calc_3"),
+        ],
+        [
+            InlineKeyboardButton("4", callback_data=f"calc_4"),
+            InlineKeyboardButton("5", callback_data=f"calc_5"),
+            InlineKeyboardButton("6", callback_data=f"calc_6"),
+        ],
+        [
+            InlineKeyboardButton("7", callback_data=f"calc_7"),
+            InlineKeyboardButton("8", callback_data=f"calc_8"),
+            InlineKeyboardButton("9", callback_data=f"calc_9"),
+        ],
+        [
+            InlineKeyboardButton("⌫ Delete", callback_data="calc_del"),
+            InlineKeyboardButton("0", callback_data=f"calc_0"),
+            InlineKeyboardButton("000", callback_data=f"calc_000"),
+        ],
+    ]
+    
+    if can_order:
+        buttons.append([InlineKeyboardButton(
+            f"✅ Place Order — ₹{price:.2f}", callback_data=f"confirm_qty_{qty}"
+        )])
+    else:
+        buttons.append([InlineKeyboardButton(
+            "👥 Refer & Earn — Balance Badhao" if qty > 0 and price > 0 and price >= MIN_ORDER_AMOUNT else "ℹ️ Quantity Enter Karo",
+            callback_data="refer_earn" if qty > 0 and price >= MIN_ORDER_AMOUNT and balance < price else "calc_noop"
+        )])
+    
+    buttons.append([
+        InlineKeyboardButton("🔄 Clear", callback_data="calc_clear"),
+        InlineKeyboardButton("🔙 Back", callback_data="browse")
+    ])
+    
+    return InlineKeyboardMarkup(buttons)
+
+async def show_calculator(update, context, current_input=""):
+    """Calculator message show/update karo"""
+    s = context.user_data.get("selected_service", {})
+    user = get_user(update.effective_user if hasattr(update, 'effective_user') else update.callback_query.from_user)
+    if isinstance(user, dict):
+        balance = user.get("balance", 0)
+    else:
+        balance = 0
+    
+    kb = calc_keyboard(current_input, s, balance)
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
+    
+    text = (
+        f"🖩 *Quantity Calculator*\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔷 {s.get('name', '')[:40]}\n"
+        f"💳 Balance: ₹{balance:.2f}\n"
+        f"📉 Min: {min_qty} | 📈 Max: {max_qty}\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Numbers dabao 👇_"
+    )
+    return text, kb
+
+# ═══════════════════════════════════════════════════════════════════════════════
 #  QUANTITY CALCULATOR — Live price keyboard
 # ═══════════════════════════════════════════════════════════════════════════════
+async def calc_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Calculator number pad buttons handle karo"""
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data  # calc_1, calc_del, calc_clear, calc_noop
+    
+    if data == "calc_noop":
+        return CALC_QUANTITY
+    
+    current = context.user_data.get("calc_input", "")
+    
+    if data == "calc_clear":
+        current = ""
+    elif data == "calc_del":
+        current = current[:-1]
+    elif data == "calc_000":
+        current = current + "000" if current else ""
+    else:
+        digit = data.replace("calc_", "")
+        if len(current) < 6:  # Max 6 digits
+            current = current + digit
+        # Remove leading zeros
+        current = str(int(current)) if current else ""
+    
+    context.user_data["calc_input"] = current
+    
+    s = context.user_data.get("selected_service", {})
+    user_doc = get_user(update.effective_user.id)
+    balance = user_doc.get("balance", 0)
+    min_qty = int(s.get("min", 10))
+    max_qty = int(s.get("max", 10000))
+    
+    kb = calc_keyboard(current, s, balance)
+    
+    try:
+        await query.edit_message_reply_markup(reply_markup=kb)
+    except Exception:
+        pass
+    
+    return CALC_QUANTITY
+
 async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Quick quantity button dabaya"""
     query = update.callback_query
@@ -1549,27 +1845,25 @@ async def qty_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         min_qty2 = int(s2.get("min", 10))
         max_qty2 = int(s2.get("max", 10000))
 
-        # Quick suggestion buttons as Reply Keyboard
-        suggestions = [min_qty2, 500, 1000, 2000, 5000, 10000]
-        suggestions = sorted(list(set([q for q in suggestions if min_qty2 <= q <= max_qty2])))[:6]
-
-        reply_kb = ReplyKeyboardMarkup(
-            [[KeyboardButton(str(q)) for q in suggestions[i:i+3]] for i in range(0, len(suggestions), 3)],
-            resize_keyboard=True,
-            one_time_keyboard=True,
-            input_field_placeholder=f"Min {min_qty2} - Max {max_qty2}"
-        )
-
-        await query.message.reply_text(
-            f"✏️ *Quantity Enter Karo*\n\n"
-            f"💳 *Balance:* ₹{balance:.2f}\n"
-            f"📉 *Min:* {min_qty2} | 📈 *Max:* {max_qty2}\n\n"
-            f"_Neeche se select karo ya khud type karo:_",
+        # Calculator reset karke dikhao
+        context.user_data["calc_input"] = ""
+        s2 = context.user_data.get("selected_service", {})
+        user2 = get_user(update.effective_user.id)
+        balance2 = user2.get("balance", 0)
+        kb = calc_keyboard("", s2, balance2)
+        
+        await query.edit_message_text(
+            f"🖩 *Quantity Calculator*\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔷 {s2.get('name', '')[:40]}\n"
+            f"💳 Balance: ₹{balance2:.2f}\n"
+            f"📉 Min: {min_qty2} | 📈 Max: {max_qty2}\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"_Numbers dabao 👇_",
             parse_mode="Markdown",
-            reply_markup=reply_kb
+            reply_markup=kb
         )
-        context.user_data["awaiting_quantity"] = True
-        return ENTER_QUANTITY
+        return CALC_QUANTITY
 
     qty = int(data.replace("qty_", ""))
     total_price = calculate_price(s["rate"], qty)
@@ -1695,8 +1989,9 @@ def main():
                 CallbackQueryHandler(show_category, pattern="^cat_"),
             ],
             CALC_QUANTITY: [
-                CallbackQueryHandler(qty_button_handler, pattern="^qty_"),
+                CallbackQueryHandler(calc_handler, pattern="^calc_"),
                 CallbackQueryHandler(confirm_qty_handler, pattern="^confirm_qty_"),
+                CallbackQueryHandler(qty_button_handler, pattern="^qty_"),
                 CallbackQueryHandler(refer_earn, pattern="^refer_earn$"),
                 CallbackQueryHandler(back_handler, pattern="^back_"),
                 CallbackQueryHandler(browse_services, pattern="^browse$"),
@@ -1729,6 +2024,7 @@ def main():
     app.add_handler(CallbackQueryHandler(how_to_use, pattern="^how_to_use$"))
     app.add_handler(CallbackQueryHandler(refer_earn, pattern="^refer_earn$"))
     app.add_handler(CallbackQueryHandler(why_free, pattern="^why_free$"))
+    app.add_handler(CallbackQueryHandler(calc_handler, pattern="^calc_"))
     app.add_handler(CallbackQueryHandler(qty_button_handler, pattern="^qty_"))
     app.add_handler(CallbackQueryHandler(confirm_qty_handler, pattern="^confirm_qty_"))
     app.add_handler(CallbackQueryHandler(back_handler, pattern="^back_"))
